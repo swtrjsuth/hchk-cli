@@ -9,11 +9,15 @@ import (
 	"net/http"
 	"io"
 	"os"
+        "strconv"
 )
 
 func main() {
 	var flagConfigFile string
+        var flagQueryMode string
+
 	flag.StringVar(&flagConfigFile, "conf", "", "Full filesystem path to config file (JSON)")
+        flag.StringVar(&flagQueryMode, "q", "", "Query health status of all hosts")
 
 	flag.Parse()
 
@@ -59,14 +63,22 @@ func main() {
 		idtoken := authdata["idToken"]
 		timestamp := fmt.Sprintf("%d",time.Now().Unix())
 
-		payloadD := map[string]string{"t": timestamp, "e": expectEvery}
-		payloadB, _ := json.Marshal(payloadD)
+                var updateUrl string
+                httpMethod := http.MethodPatch
+                var payloadB []byte
 
-		updateUrl := fmt.Sprintf("%s/workloads/%s.json?auth=%s", firebaseUrl, uid, idtoken)
+                if flagQueryMode == "" {
+                    updateUrl = fmt.Sprintf("%s/workloads/%s.json?auth=%s", firebaseUrl, uid, idtoken)
+		    payloadD := map[string]string{"t": timestamp, "e": expectEvery}
+		    payloadB, _ = json.Marshal(payloadD)
+                } else {
+                    httpMethod = http.MethodGet
+                    updateUrl = fmt.Sprintf("%s/workloads.json?auth=%s", firebaseUrl, idtoken)
+                }
 
 		client := &http.Client{}
 
-		req, err := http.NewRequest(http.MethodPatch, updateUrl, bytes.NewBuffer(payloadB))
+		req, err := http.NewRequest(httpMethod, updateUrl, bytes.NewBuffer(payloadB))
 		req.Header.Set("Content-Type", "application/json")
 		if err != nil {
 			panic(err)
@@ -79,10 +91,26 @@ func main() {
 
 		defer resp.Body.Close()
 
-		_, err2 := io.ReadAll(resp.Body)
+		rb2, err2 := io.ReadAll(resp.Body)
 		if err2 != nil {
 			panic(err2)
-		}
+		} else if flagQueryMode != "" {
+                    var hcdata map[string]interface{}
+
+                    if err := json.Unmarshal(rb2, &hcdata); err != nil {
+                        panic(err)
+                    }
+
+                    for key, val := range hcdata {
+                        tstmp := val.(map[string]interface{})["t"]
+                        i, err := strconv.ParseInt(tstmp.(string), 10, 64)
+                        if err != nil {
+                            panic(err)
+                        }
+                        tm := time.Unix(i, 0)
+                        fmt.Printf("%s -> %s\n",key,tm)
+                    }
+                }
 
 	}
 }
